@@ -1,0 +1,6 @@
+{
+  "name": "Wingo AI Pattern Intelligence Engine v10.0",
+  "description": "Ultra Pro Max Wingo 1M pattern intelligence & prediction engine with neon matrix cyberpunk terminal UI, 26+ pattern scanner, real-time polling, and win/loss notifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
