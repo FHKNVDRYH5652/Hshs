@@ -7,7 +7,7 @@ interface TopBarProps {
   nextPeriod: string;
   onRefresh: () => void;
   isPolling: boolean;
-  dataSource: 'live' | 'simulated_fallback';
+  dataSource: string;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -100,8 +100,8 @@ export const TopBar: React.FC<TopBarProps> = ({
         <div className="flex items-center gap-2">
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded bg-[#03131d] border border-[#00ff66]/30 text-xs font-mono">
             <Activity className={`w-3.5 h-3.5 ${isPolling ? 'text-[#00ff66] animate-spin' : 'text-[#00e5ff]'}`} />
-            <span className="text-gray-300">
-              {dataSource === 'live' ? 'API LIVE' : 'AUTO SYNC'}
+            <span className="text-gray-300 font-bold uppercase">
+              {dataSource || 'LIVE SYNC'}
             </span>
             <span className="w-2 h-2 rounded-full bg-[#00ff66] animate-pulse"></span>
           </div>

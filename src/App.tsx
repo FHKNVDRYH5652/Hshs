@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WingoItem, PredictionData, PredictionHistoryItem, GlobalStats } from './types';
 import { analyzeWingoHistory, enhancePredictionWithGemini } from './utils/patternEngine';
+import { fetchLiveWingoHistory, getCachedWingoHistory } from './services/wingoDataService';
 import { ParticleBackground } from './components/ParticleBackground';
 import { TopBar } from './components/TopBar';
 import { PredictionHeroCard } from './components/PredictionHeroCard';
@@ -13,11 +14,14 @@ import { VictoryModal } from './components/VictoryModal';
 import { soundFx } from './services/soundEffects';
 
 export default function App() {
-  const [history, setHistory] = useState<WingoItem[]>([]);
-  const [prediction, setPrediction] = useState<PredictionData | null>(null);
+  const [history, setHistory] = useState<WingoItem[]>(() => getCachedWingoHistory());
+  const [prediction, setPrediction] = useState<PredictionData | null>(() => {
+    const initialHistory = getCachedWingoHistory();
+    return initialHistory.length > 0 ? analyzeWingoHistory(initialHistory, 'WIN', 0) : null;
+  });
   const [predictionLogs, setPredictionLogs] = useState<PredictionHistoryItem[]>([]);
   const [isPolling, setIsPolling] = useState<boolean>(false);
-  const [dataSource, setDataSource] = useState<'live' | 'simulated_fallback'>('live');
+  const [dataSource, setDataSource] = useState<string>('LIVE SYNC');
   const [modalType, setModalType] = useState<'WIN' | 'JACKPOT_WIN' | 'LOSS' | null>(null);
   const [modalPeriod, setModalPeriod] = useState<string>('');
   const [modalActualNum, setModalActualNum] = useState<number | undefined>(undefined);
@@ -37,60 +41,14 @@ export default function App() {
 
   const lastProcessedPeriodRef = useRef<string | null>(null);
 
-  // Fetch API data function
+  // Fetch API data function (Multi-tier: Local API -> Direct Upstream -> CORS Proxies -> Clock Engine)
   const fetchWingoHistory = useCallback(async () => {
     try {
       setIsPolling(true);
-      const res = await fetch('/api/wingo-history');
-      const json = await res.json();
+      const { items, source } = await fetchLiveWingoHistory();
+      setDataSource(source);
 
-      let items: WingoItem[] = [];
-
-      if (json && json.success && json.data) {
-        setDataSource(json.source || 'live');
-        const rawData = json.data;
-
-        // Extract list depending on API shape
-        let list = Array.isArray(rawData)
-          ? rawData
-          : (rawData.data || rawData.list || rawData.history || []);
-
-        items = list.map((item: any, idx: number) => {
-          const num = Number(item.number !== undefined ? item.number : item.result !== undefined ? item.result : 0);
-          const p = String(item.issueNumber || item.period || item.issue || (20260803100000 + idx));
-          
-          const rawSize = (item.size || '').toString().toUpperCase();
-          const size: 'BIG' | 'SMALL' = (rawSize === 'BIG' || rawSize === 'SMALL') ? rawSize : (num >= 5 ? 'BIG' : 'SMALL');
-          
-          const rawColour = (item.colour || item.color || '').toString().toLowerCase();
-          let color: any = 'GREEN';
-          if (rawColour.includes('violet')) {
-            color = rawColour.includes('red') ? 'RED_VIOLET' : rawColour.includes('green') ? 'GREEN_VIOLET' : 'VIOLET';
-          } else if (rawColour.includes('red')) {
-            color = 'RED';
-          } else if (rawColour.includes('green')) {
-            color = 'GREEN';
-          } else {
-            if (num === 0) color = 'RED_VIOLET';
-            else if (num === 5) color = 'GREEN_VIOLET';
-            else if ([2, 4, 6, 8].includes(num)) color = 'RED';
-            else color = 'GREEN';
-          }
-
-          return {
-            issueNumber: p,
-            period: p,
-            number: num,
-            size,
-            color,
-            time: item.time || ''
-          };
-        });
-      }
-
-      if (items.length > 0) {
-        // Sort newest first
-        items.sort((a, b) => (BigInt(b.period) > BigInt(a.period) ? 1 : -1));
+      if (items && items.length > 0) {
         setHistory(items);
 
         const latestFinished = items[0];
@@ -169,11 +127,11 @@ export default function App() {
 
           const lastPredStatus = lossStreak > 0 ? 'LOSS' : 'WIN';
 
-          // 3. Generate Loss-Protected Prediction locally
+          // 3. Generate Loss-Protected Prediction locally (Works everywhere including GitHub Pages!)
           const newPred = analyzeWingoHistory(items, lastPredStatus, lossStreak);
           setPrediction(newPred);
 
-          // 4. Trigger Gemini AI Deep Analysis with lossStreak context
+          // 4. Optionally trigger Gemini AI Deep Analysis in background if backend endpoint is present
           fetch('/api/gemini-predict', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -183,13 +141,18 @@ export default function App() {
               consecutiveLosses: lossStreak
             })
           })
-            .then((res) => res.json())
+            .then((res) => {
+              if (res.ok) return res.json();
+              return null;
+            })
             .then((json) => {
               if (json && json.success && json.aiPrediction) {
                 setPrediction((prev) => (prev ? enhancePredictionWithGemini(prev, json.aiPrediction) : null));
               }
             })
-            .catch((err) => console.warn('Gemini async predict notice:', err));
+            .catch(() => {
+              // Silently handle if running in static hosting (GitHub Pages)
+            });
 
           // 5. Register new prediction log for next period if not already registered
           const exists = nextLogs.some((l) => l.period === newPred.nextPeriod);
